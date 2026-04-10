@@ -65,7 +65,7 @@ enum ProtectService {
         // the user never sees, so permissions can't be overridden.
         let ownerPassword = UUID().uuidString
 
-        var options: [PDFDocument.WriteOption: Any] = [
+        var options: [PDFDocumentWriteOption: Any] = [
             .ownerPasswordOption: ownerPassword,
             .userPasswordOption: password
         ]

@@ -29,7 +29,7 @@ enum FileService {
     static func atomicWrite(
         _ document: PDFDocument,
         to destination: URL,
-        options: [PDFDocument.WriteOption: Any] = [:]
+        options: [PDFDocumentWriteOption: Any] = [:]
     ) throws -> URL {
         let directory = destination.deletingLastPathComponent()
         guard FileManager.default.fileExists(atPath: directory.path) else {

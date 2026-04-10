@@ -66,7 +66,7 @@ struct RotateView: View {
 
                     // Page thumbnail grid
                     if let document = viewModel.document {
-                        PageThumbnailGridView(
+                        RotatePageGrid(
                             document: document,
                             selectedPages: $viewModel.selectedPages,
                             pendingRotations: viewModel.pendingRotations
@@ -166,9 +166,9 @@ struct RotateView: View {
     }
 }
 
-// MARK: - Page Thumbnail Grid View
+// MARK: - Rotate Page Grid (0-based indices, shows rotation badges)
 
-struct PageThumbnailGridView: View {
+struct RotatePageGrid: View {
     let document: PDFDocument
     @Binding var selectedPages: Set<Int>
     let pendingRotations: [Int: Int]
