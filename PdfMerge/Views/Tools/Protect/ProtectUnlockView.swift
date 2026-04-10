@@ -23,11 +23,10 @@ struct ProtectUnlockView: View {
                 .pickerStyle(.segmented)
                 .labelsHidden()
                 .padding(.top, AppConstants.sectionSpacing)
-                .onChange(of: viewModel.mode) { _ in
-                    // Update output filename suffix when mode changes
+                .onChange(of: viewModel.mode) { _, newMode in
                     if let url = viewModel.inputURL {
                         let stem = url.deletingPathExtension().lastPathComponent
-                        let suffix = viewModel.mode == .protect ? "_protected" : "_unlocked"
+                        let suffix = newMode == .protect ? "_protected" : "_unlocked"
                         viewModel.outputSettings.filename = "\(stem)\(suffix)"
                     }
                 }

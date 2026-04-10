@@ -32,20 +32,16 @@ enum FieldType: String, CaseIterable {
 
     init(annotation: PDFAnnotation) {
         // Only called for confirmed widget annotations
-        if let widgetType = annotation.widgetFieldType {
-            switch widgetType {
-            case .button:
-                self = .checkbox
-            case .choice:
-                self = .dropdown
-            case .signature:
-                self = .signature
-            case .text:
-                self = .textField
-            @unknown default:
-                self = .textField
-            }
-        } else {
+        switch annotation.widgetFieldType {
+        case .button:
+            self = .checkbox
+        case .choice:
+            self = .dropdown
+        case .signature:
+            self = .signature
+        case .text:
+            self = .textField
+        @unknown default:
             self = .textField
         }
     }
