@@ -2,6 +2,7 @@ import PDFKit
 import AppKit
 import SwiftUI
 
+@MainActor
 class PDFViewerCoordinator: NSObject {
     weak var pdfView: PDFView? {
         didSet {
