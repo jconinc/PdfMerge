@@ -41,7 +41,7 @@ enum FieldType: String, CaseIterable {
             self = .signature
         case .text:
             self = .textField
-        @unknown default:
+        default:
             self = .textField
         }
     }

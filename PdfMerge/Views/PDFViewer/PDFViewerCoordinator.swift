@@ -46,26 +46,32 @@ class PDFViewerCoordinator: NSObject {
         guard let pdfView, annotateViewModel != nil else { return }
 
         clickMonitor = NSEvent.addLocalMonitorForEvents(matching: .leftMouseDown) { [weak self] event in
+            // Extract what we need from NSEvent before crossing into MainActor,
+            // since NSEvent is not Sendable.
+            let windowPoint = event.locationInWindow
+            let eventWindow = event.window
+
             guard let self else { return event }
-            return MainActor.assumeIsolated {
-                self.handleClick(event, in: pdfView)
-            } ?? event
+            let handled = MainActor.assumeIsolated {
+                self.handleClick(windowPoint: windowPoint, eventWindow: eventWindow, pdfView: pdfView)
+            }
+            return handled ? nil : event
         }
     }
 
-    private func handleClick(_ event: NSEvent, in pdfView: PDFView) -> NSEvent? {
+    /// Returns true if the click was consumed (annotation placed).
+    private func handleClick(windowPoint: NSPoint, eventWindow: NSWindow?, pdfView: PDFView) -> Bool {
         guard let viewModel = annotateViewModel,
               viewModel.selectedTool != .selectPan,
-              event.window === pdfView.window else {
-            return event
+              eventWindow === pdfView.window else {
+            return false
         }
 
-        let windowPoint = event.locationInWindow
         let viewPoint = pdfView.convert(windowPoint, from: nil)
 
         guard pdfView.bounds.contains(viewPoint),
               let page = pdfView.page(for: viewPoint, nearest: true) else {
-            return event
+            return false
         }
 
         let pagePoint = pdfView.convert(viewPoint, to: page)
@@ -79,10 +85,10 @@ class PDFViewerCoordinator: NSObject {
 
         if let annotation {
             viewModel.addAnnotation(annotation, to: page)
-            return nil // consume the click
+            return true
         }
 
-        return event
+        return false
     }
 
     private func createAnnotation(
