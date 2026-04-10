@@ -1,5 +1,6 @@
 import Foundation
 import PDFKit
+import CoreGraphics
 
 /// Permissions to apply when protecting a PDF.
 struct PDFPermissions {
@@ -65,20 +66,44 @@ enum ProtectService {
         // the user never sees, so permissions can't be overridden.
         let ownerPassword = UUID().uuidString
 
-        var options: [PDFDocumentWriteOption: Any] = [
-            .ownerPasswordOption: ownerPassword,
-            .userPasswordOption: password
+        // PDFKit write options only support owner/user passwords.
+        // For permission control, write via CGPDFContext which supports
+        // kCGPDFContextAllowsPrinting and kCGPDFContextAllowsCopying.
+        guard let data = document.dataRepresentation(),
+              let provider = CGDataProvider(data: data as CFData),
+              let cgDoc = CGPDFDocument(provider) else {
+            throw ProtectError.protectionFailed
+        }
+
+        let totalPages = cgDoc.numberOfPages
+        let outputData = NSMutableData()
+        guard let consumer = CGDataConsumer(data: outputData as CFMutableData) else {
+            throw ProtectError.protectionFailed
+        }
+
+        let auxInfo: [CFString: Any] = [
+            kCGPDFContextOwnerPassword: ownerPassword,
+            kCGPDFContextUserPassword: password,
+            kCGPDFContextAllowsPrinting: permissions.allowPrinting,
+            kCGPDFContextAllowsCopying: permissions.allowCopying
         ]
 
-        // Set permissions via PDF write options
-        if !permissions.allowPrinting {
-            options[.allowsPrintingOption] = false
-        }
-        if !permissions.allowCopying {
-            options[.allowsCopyingOption] = false
+        var mediaBox = CGRect(x: 0, y: 0, width: 612, height: 792)
+        guard let context = CGContext(consumer: consumer, mediaBox: &mediaBox, auxInfo as CFDictionary) else {
+            throw ProtectError.protectionFailed
         }
 
-        return try FileService.atomicWrite(document, to: outputURL, options: options)
+        for pageNum in 1...totalPages {
+            guard let page = cgDoc.page(at: pageNum) else { continue }
+            var pageBox = page.getBoxRect(.mediaBox)
+            context.beginPage(mediaBox: &pageBox)
+            context.drawPDFPage(page)
+            context.endPage()
+        }
+
+        context.closePDF()
+
+        return try FileService.atomicWrite(outputData as Data, to: outputURL)
     }
 
     // MARK: - Unlock
