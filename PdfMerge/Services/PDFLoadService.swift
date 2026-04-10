@@ -72,10 +72,8 @@ enum PDFLoadService {
     static func hasFormFields(document: PDFDocument) -> Bool {
         for i in 0..<document.pageCount {
             guard let page = document.page(at: i) else { continue }
-            for annotation in page.annotations {
-                if annotation.widgetFieldType != nil {
-                    return true
-                }
+            for annotation in page.annotations where annotation.type == "Widget" {
+                return true
             }
         }
         return false

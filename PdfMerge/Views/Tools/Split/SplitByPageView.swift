@@ -115,7 +115,7 @@ struct SplitByPageView: View {
                     // Selection overlay
                     if isSelected {
                         RoundedRectangle(cornerRadius: 4)
-                            .strokeBorder(.accentColor, lineWidth: 2.5)
+                            .strokeBorder(Color.accentColor, lineWidth: 2.5)
                             .frame(
                                 width: AppConstants.gridThumbnailSize.width,
                                 height: AppConstants.gridThumbnailSize.height
@@ -127,7 +127,7 @@ struct SplitByPageView: View {
                                 Spacer()
                                 Image(systemName: "checkmark.circle.fill")
                                     .font(.system(size: 16))
-                                    .foregroundStyle(.white, .accentColor)
+                                    .foregroundStyle(.white, Color.accentColor)
                                     .padding(4)
                             }
                             Spacer()

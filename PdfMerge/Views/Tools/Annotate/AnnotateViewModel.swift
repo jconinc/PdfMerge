@@ -217,7 +217,7 @@ final class AnnotateViewModel: ObservableObject {
     // MARK: - Helpers
 
     private func isWidgetAnnotation(_ annotation: PDFAnnotation) -> Bool {
-        annotation.type == "Widget" || annotation.widgetFieldType != nil
+        annotation.type == "Widget"
     }
 
     func annotationLabel(for annotation: PDFAnnotation) -> String {

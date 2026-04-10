@@ -159,7 +159,7 @@ final class FillFormViewModel: ObservableObject {
         for pageIndex in 0..<doc.pageCount {
             guard let page = doc.page(at: pageIndex) else { continue }
             for annotation in page.annotations {
-                if annotation.widgetFieldType != nil {
+                if annotation.type == "Widget" {
                     let info = FormFieldInfo(annotation: annotation, page: pageIndex)
                     fields.append(info)
                 }
@@ -233,7 +233,7 @@ final class FillFormViewModel: ObservableObject {
                     }
                     for pageIndex in 0..<flatDoc.pageCount {
                         guard let page = flatDoc.page(at: pageIndex) else { continue }
-                        let widgets = page.annotations.filter { $0.widgetFieldType != nil }
+                        let widgets = page.annotations.filter { $0.type == "Widget" }
                         for widget in widgets {
                             page.removeAnnotation(widget)
                         }
@@ -270,7 +270,7 @@ final class FillFormViewModel: ObservableObject {
         for pageIndex in 0..<doc.pageCount {
             guard let page = doc.page(at: pageIndex) else { continue }
             for annotation in page.annotations {
-                guard annotation.widgetFieldType != nil else { continue }
+                guard annotation.type == "Widget" else { continue }
                 annotation.widgetStringValue = ""
             }
         }

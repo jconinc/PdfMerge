@@ -46,7 +46,10 @@ class PDFViewerCoordinator: NSObject {
         guard let pdfView, annotateViewModel != nil else { return }
 
         clickMonitor = NSEvent.addLocalMonitorForEvents(matching: .leftMouseDown) { [weak self] event in
-            self?.handleClick(event, in: pdfView) ?? event
+            guard let self else { return event }
+            return MainActor.assumeIsolated {
+                self.handleClick(event, in: pdfView)
+            } ?? event
         }
     }
 
