@@ -1,0 +1,831 @@
+# PDF Tool for macOS — Final Specification (v4)
+
+**Platform:** macOS 14.0 Sonoma and later, Apple Silicon native  
+**Language:** Swift 5.10+  
+**Frameworks:** SwiftUI, PDFKit, AppKit, Vision, UniformTypeIdentifiers  
+**Distribution:** Direct `.app` install, notarized with Apple Developer ID  
+
+---
+
+## 1. Design Philosophy
+
+This app must feel like it shipped with macOS. It should be invisible — the user thinks about their PDF, not about the tool. Every default should be correct without the user making a choice. Every failure should be recoverable and explained in plain English. The primary user is non-technical; she should never encounter a concept she has to look up.
+
+PDFKit is Apple's own PDF engine — the same one powering Preview. By building on it, the app inherits Preview's scroll physics, text selection, zoom behavior, find, form interaction, and print dialog at no extra cost. Do not reimplement any behavior that PDFKit already provides.
+
+---
+
+## 2. Distribution & Installation
+
+The app must be signed with an Apple Developer ID certificate and notarized through Apple's notarization service before delivery. This is non-negotiable. An unsigned or unnotarized app will show Gatekeeper warnings ("can't be opened because it is from an unidentified developer") which immediately destroy trust and may cause the user to abandon the app silently.
+
+The final deliverable is a `.dmg` disk image. Installation instructions on the DMG background should be a single sentence: "Drag PDF Tool to your Applications folder."
+
+There are no network entitlements, no analytics, no update checks, and no telemetry of any kind. The app is entirely offline by design. This should be enforced at the entitlements level, not just by intent.
+
+---
+
+## 3. Window & Layout
+
+The main window opens at 960 × 660 points, with a minimum of 800 × 540. It is resizable and remembers its last size and position between launches.
+
+Layout is a two-column NavigationSplitView: a fixed-width sidebar on the left (200 points) and a detail panel filling the remainder. The window title updates to reflect the currently selected tool. Standard macOS traffic light buttons behave normally.
+
+---
+
+## 4. Sidebar Navigation
+
+The sidebar contains a list of tools, each represented by a system SF Symbol icon and a short label. Selecting a tool switches the detail panel. The selected tool is highlighted with the system accent color.
+
+Tools in order:
+
+- Merge
+- Split
+- Rotate
+- Compress
+- Extract Pages
+- OCR
+- Annotate
+- Fill Form
+- Convert
+- Print
+- Protect / Unlock
+
+A Settings item is pinned to the bottom of the sidebar. Each tool is also reachable via Cmd+1 through Cmd+0 in sequence.
+
+---
+
+## 5. Visual Design
+
+Use native macOS system controls and semantic colors throughout. Do not use custom hex color values, custom fonts, or non-standard corner radii. The app must look correct in both light and dark mode without any manual color overrides — this is achieved automatically by using only system semantic colors.
+
+Typography uses SF Pro at system-standard sizes: `.title2` for panel headings, `.body` for labels and inputs, `.caption` for metadata. Use SwiftUI's built-in `Form`, `GroupBox`, `Picker`, `Toggle`, `Stepper`, and `TextField` components rather than custom-built equivalents. These components already match macOS HIG and handle accessibility, focus, and keyboard navigation correctly.
+
+Drop zones use a dashed rounded rectangle border that animates to the accent color when a compatible file is dragged over. The transition duration is 150ms.
+
+Primary action buttons use the `.borderedProminent` button style at `.large` control size. Secondary buttons use `.bordered`. Destructive actions use the `.destructive` role. These are standard SwiftUI modifiers — do not style buttons manually.
+
+---
+
+## 6. File Handling — Global Rules
+
+### Atomic Writes
+
+Every file written by this app must use a two-step atomic write: first write to a hidden temporary file in the same directory as the intended output, then rename to the final filename. This guarantees that if the operation is interrupted, the original file is never corrupted and no partial output file is left at the destination. On next launch, any orphaned temporary files in the output directory are silently deleted.
+
+### Overwrite Confirmation
+
+The app never silently overwrites an existing file. When an output path already exists, a confirmation sheet appears with three options: Replace (destructive), Save as Copy, and Cancel. This rule has no exceptions and no "don't ask again" option.
+
+### Default Output Location
+
+The default output location for every tool is the same folder as the input file. This is what the user expects. The output filename follows the pattern `[original name]_[tool].pdf` (e.g., `contract_merged.pdf`, `report_compressed.pdf`). Both the filename and location are editable before running the operation.
+
+### Auto-Open After Operation
+
+After a successful operation, the output file automatically opens in Preview. This is the default behavior and is configurable in Preferences. A "Show in Finder" option is also available in the success banner.
+
+### Password-Protected PDFs
+
+When a tool attempts to load a PDF and finds it locked, an inline password field appears within the file row or panel — not as a modal dialog. The field shows a lock badge and prompts "This PDF is password protected." Incorrect passwords show an inline error. Once unlocked, the operation proceeds normally. This applies to every tool without exception.
+
+### Error Messages
+
+No Swift error types, system error codes, or technical descriptions are ever shown to the user. Every error is translated into a plain English sentence that describes what happened and suggests what to do. Examples:
+
+- Permission denied → "Can't save here — try your Desktop instead."
+- File not found → "This file has been moved or deleted."
+- Corrupted PDF → "This PDF appears to be damaged. Try the Repair option."
+- Disk full → "There isn't enough disk space to complete this operation."
+- Incorrect password → "That password isn't correct — please try again."
+
+Errors for non-critical operations appear inline below the action button. Errors involving potential data loss appear as sheets.
+
+### Repair
+
+When a PDF fails to load or process, a "Try to Repair" option appears alongside the error message. The repair operation attempts to normalize the PDF through a PDFKit read-and-rewrite pass, which resolves many common issues like broken cross-reference tables. The output is always a new file named `[original]_repaired.pdf`. Repair is best-effort — if it fails, the error message says "This PDF couldn't be repaired here. Try opening it in Preview and exporting a new copy."
+
+---
+
+## 7. Tool Specifications
+
+---
+
+### 7.1 Merge
+
+Combine multiple PDF files into one, in a user-defined order.
+
+The panel has a drop zone at the top accepting multiple PDFs simultaneously. Below it is a scrollable file list. Each row shows a thumbnail of the first page, the filename, page count, and file size. Rows are reorderable by drag and have a remove button. Below the list are "Add More Files" and "Clear All" buttons.
+
+A grouped settings section below the list contains the output filename field, the save location (showing the current path with a "Change…" button), and a toggle for "Open after merging" (default: on).
+
+The primary action button is labeled "Merge [N] PDFs" where N reflects the current file count. It is disabled when fewer than 2 files are present, with a tooltip explaining why.
+
+Password-protected files in the list show a lock badge; an inline password field appears in that row when the user clicks it.
+
+The merge operation runs in the background. A progress indicator on the button shows "Merging… 2 of 3" during the operation. A Cancel button appears for operations taking longer than 2 seconds.
+
+On success, the status banner reads "✓ Merged 3 PDFs → contract_merged.pdf" with a "Show in Finder" link.
+
+---
+
+### 7.2 Split
+
+Break one PDF into multiple files.
+
+A single-file drop zone sits at the top. Once a file is loaded, its name and page count appear. A segmented control offers three modes:
+
+**By Range:** A table where each row defines a page range (e.g., "1–5") and an output filename. Rows can be added and removed. Overlapping ranges are flagged with a red highlight and an inline error. The ranges must cover contiguous or non-overlapping sets of pages; gaps are allowed.
+
+**Every N Pages:** A stepper for N, with a live preview below: "This will create 4 files of 5 pages each (last file: 3 pages)."
+
+**By Page:** A scrollable thumbnail grid of all pages. Clicking a thumbnail toggles its selection. Cmd+A selects all. Selected pages are extracted as individual files (one per page) or as a single combined PDF, toggled by a checkbox.
+
+All modes share the same output folder selector and primary "Split" button at the bottom.
+
+---
+
+### 7.3 Rotate
+
+Rotate individual pages or all pages of a PDF.
+
+A single-file drop zone, followed by a scrollable grid of page thumbnails in three columns. Each thumbnail shows its page number below. Clicking selects a page; Cmd+click adds to the selection; "Select All" selects every page.
+
+Three rotation buttons apply to the current selection: Rotate Left 90°, Rotate Right 90°, Rotate 180°. Thumbnail images update immediately to reflect the pending rotation — this is a preview only, nothing is written until Save is clicked.
+
+A "Reset All" button clears all pending rotations. The "Save" button triggers the overwrite confirmation sheet.
+
+---
+
+### 7.4 Compress
+
+Reduce the file size of one or more PDFs.
+
+Accepts single or multiple files via drop zone. A quality preset picker offers four options: Screen (smallest, 72 dpi), eBook (150 dpi), Printer (300 dpi, default), and Prepress (300 dpi with color preservation).
+
+After a file loads, a size estimate is shown: "Estimated output: ~2.1 MB (currently 8.4 MB, ~75% reduction)." This estimate is based on image density analysis and labeled as approximate.
+
+After the operation completes, the actual before/after sizes are shown. If the reduction is less than 10%, the success message reads: "This PDF couldn't be reduced much — it may already be optimized or contain mostly vector content."
+
+Compression is implemented using native macOS Quartz filter capabilities (the same mechanism Preview uses for "Reduce File Size"), not manual image stream parsing.
+
+For multiple files, a per-file progress row is shown with an overall progress bar.
+
+---
+
+### 7.5 Extract Pages
+
+Pull specific pages into a new PDF.
+
+A single-file drop zone. Two modes toggled by a tab control:
+
+**Visual:** Thumbnail grid with click-to-select (same interaction as Split's By Page mode). A badge shows the selected count: "8 pages selected."
+
+**Range:** A text field accepting free-form input like "1, 3–7, 12, 15–20." Validation runs live as the user types. Invalid syntax is highlighted with a red border and an inline error explaining the problem.
+
+Output options: a single combined PDF (default) or one PDF per selected page. Output filename and save location fields below.
+
+---
+
+### 7.6 OCR — Text Recognition
+
+Make scanned or image-based PDFs searchable and text-selectable.
+
+Uses Apple's Vision framework exclusively. No third-party libraries, no Homebrew dependencies, no setup required.
+
+**Output modes** (segmented control): Searchable PDF, Extract Text, or Both.
+
+**Language selector:** Populated dynamically from the Vision framework's supported language list at runtime — not a hardcoded list. Default is the system language.
+
+**Accuracy:** Fast or Accurate (default). Accurate uses Vision's highest-precision recognition level.
+
+**Page handling toggle:** "Skip pages that already have text" is on by default. When on, the tool detects pages with an existing text layer and skips OCR for those pages, preserving the original text.
+
+**Deskew toggle:** On by default. Uses Vision's document orientation detection to correct tilted scans before recognition.
+
+Progress shows per-page status: "Processing page 3 of 12…" with a Cancel button.
+
+**Searchable PDF implementation:** The output PDF preserves the original page appearance exactly. The text layer is implemented by drawing recognized text into the page content stream as invisible text (using Core Graphics with a text rendering mode of invisible/clip), not as PDF annotations. This is the correct approach — annotations do not produce a proper searchable text layer and behave inconsistently across PDF readers and Spotlight. The acceptance criterion is: text is selectable, copyable, and found by Cmd+F in Preview and by macOS Spotlight.
+
+**Vision coordinate mapping:** Vision uses normalized coordinates with origin at the bottom-left of the image. PDF pages also use bottom-left as origin but may have a non-zero origin if the page has a crop box. All Vision bounding boxes must be mapped against the page's crop box bounds, accounting for the crop box's minimum X and Y offsets — not assuming the page starts at (0, 0).
+
+**Extract Text mode:** Shows a scrollable text preview before saving, with "Copy All" and "Save as .txt" buttons.
+
+Output filename: `[original]_ocr.pdf` or `[original]_text.txt`.
+
+---
+
+### 7.7 Annotate
+
+Add highlights, notes, drawings, and shapes to PDFs. Annotations are stored as proper PDF annotations — editable and visible in Preview, Acrobat, and all standard PDF readers.
+
+**Layout:** A horizontal annotation toolbar at the top, a collapsible annotations list panel on the left (220 points), and a full PDFView in the center.
+
+**Toolbar tools:** Select/Pan, Highlight, Underline, Strikethrough, Freehand Draw, Text Note, Popup Note, Arrow, Rectangle, Circle. A color picker and stroke weight selector (thin / medium / thick) apply to the active tool. Undo and Redo buttons are on the right side of the toolbar, alongside Save.
+
+**PDFView** is configured for continuous vertical scrolling with auto-scaling. All built-in PDFKit behaviors are enabled: text selection, copy, Cmd+F find, pinch zoom, trackpad scroll, and double-click word select. None of these are reimplemented — they are inherited from PDFKit.
+
+**Highlight behavior:** When the Highlight tool is active, the user drags over text and the selection snaps to word boundaries using PDFKit's native text selection. The annotation is created from the selection bounds. On pages with no text layer (scanned PDFs), highlighting falls back to a freehand rectangle overlay, and a tooltip reads: "No text detected on this page — highlighting will draw a rectangle."
+
+**Annotations list panel:** Shows all annotations grouped by page. Each entry shows the type icon and a text preview (the highlighted text, or the note content). Clicking an entry scrolls the viewer to that annotation and selects it. Right-clicking offers Delete.
+
+**Undo/Redo:** PDFKit's built-in undo manager handles annotation undo. The PDFView's undo manager must be linked to the window's undo manager so that Cmd+Z from the menu bar works correctly.
+
+**Save:** "Save" overwrites the original file after confirmation. "Save As…" opens a save panel. Annotations remain editable (not flattened) by default.
+
+---
+
+### 7.8 Fill Form
+
+Fill in PDF AcroForm fields: text fields, checkboxes, radio buttons, and dropdowns.
+
+**Layout:** A collapsible fields list panel on the left (240 points) and a PDFView on the right. The top bar has "Clear All Fields" and "Save Filled PDF" buttons.
+
+**PDFView** operates in interactive mode. PDFKit handles AcroForm field interaction natively — clicking a text field places a cursor, checkboxes toggle, dropdowns open a list. No custom field rendering is required.
+
+**Fields panel:** Lists all form fields grouped by page. Each entry shows the field name, type icon, and a completion indicator (empty / filled). Clicking an entry scrolls the viewer to that field.
+
+**Tab order:** The Tab key moves focus to the next field following the PDF's defined tab order, falling back to top-to-bottom, left-to-right order if the tab order is undefined.
+
+**XFA forms:** If the PDF contains a dynamic XFA form, a banner appears: "This is a dynamic form type that requires Adobe Acrobat Reader for full support. Download Adobe Reader (free) to fill it in." If the PDF also has a standard AcroForm layer, that layer is still available and the banner is informational only.
+
+**Save options:** A sheet with two choices — "Keep fields editable" (default) and "Flatten (lock values in place)." Flatten burns the field values into the page content, ensuring the form prints correctly in all applications. Output: `[original]_filled.pdf`.
+
+**No-fields state:** If the loaded PDF has no form fields, a banner reads: "This PDF doesn't have fillable form fields. Use the Annotate tool to add text notes manually."
+
+---
+
+### 7.9 Convert
+
+Convert between PDF and other formats.
+
+**Sub-modes** (segmented control): PDF → Word, PDF → Excel, PDF → Images, Images → PDF.
+
+**PDF → Word and PDF → Excel** require a bundled Python environment. To avoid trust friction, these two sub-modes are presented under an "Advanced" disclosure group, collapsed by default, with a note: "Word and Excel conversion uses an included conversion engine. The first conversion may take a moment to start." No network access is used. The bundled Python subprocess must run with explicitly scoped environment variables — PYTHONHOME and PYTHONPATH must point only to the bundled directory, preventing any interaction with the user's system Python installation.
+
+If a PDF has no text layer, a warning banner reads: "This PDF appears to be scanned. Run OCR first for better conversion results."
+
+**PDF → Images:** Native implementation using PDFKit page rendering. Format options: JPG, PNG, TIFF. Resolution options: 72, 150, 300, 600 dpi. Page range input. Output files named `[original]_page001.jpg` etc. Output folder selector. Fully native — no external dependencies.
+
+**Images → PDF:** Native implementation. Multi-file drop zone accepting JPG, PNG, TIFF, HEIC, BMP. Reorderable file list (same interaction as Merge). Page size options: A4, Letter, Fit to Image (default). Output filename and save location. Fully native.
+
+---
+
+### 7.10 Print
+
+Print a PDF using the macOS native system print dialog. No custom print dialog is built. No "Print Now" bypass exists.
+
+A single-file drop zone with a small read-only PDF preview. A quick settings area mirrors the most common print settings (page range, copies, paper size, orientation) for reference — these are pre-populated into the system dialog when "Print…" is clicked, but the user confirms everything in the native macOS print panel.
+
+The print operation is performed from a PDFView that is embedded in a visible, on-screen window. Printing from off-screen or deallocated views produces blank output; this constraint must be respected.
+
+The "Print…" button is the only action. It opens the standard macOS print dialog. The user can adjust any settings there.
+
+---
+
+### 7.11 Protect / Unlock
+
+**Protect:** Single-file drop zone. A password field and confirmation field with live match validation. Permission toggles: Allow Printing, Allow Copying, Allow Editing. A compatibility note reads: "Some PDF viewers may display this PDF regardless of permission settings." Output: `[original]_protected.pdf`.
+
+Acceptance criteria: the protected PDF prompts for a password when opened in Preview, and permission restrictions are applied correctly as verified in Preview and Adobe Acrobat Reader.
+
+**Unlock:** Single-file drop zone. Password field. "Remove Password" button. Wrong password shows an inline error immediately. Output: `[original]_unlocked.pdf`. If the PDF has no password, a banner reads: "This PDF is not password protected."
+
+---
+
+## 8. Shared PDF Viewer
+
+Both Annotate and Fill Form use a single shared PDFView component. It is configured for continuous vertical scrolling and auto-scaling to window width. It is an NSViewRepresentable wrapping PDFKit's PDFView.
+
+The following behaviors are provided by PDFKit without any custom implementation. Claude Code should not reimplement them:
+
+- Smooth scrolling with inertia
+- Pinch-to-zoom gesture
+- Cmd+= and Cmd+– for zoom in/out
+- Cmd+F for find (opens PDFKit's native find bar)
+- Find next and previous with Enter and Shift+Enter
+- All found matches highlighted in the document
+- Text selection by click-drag
+- Double-click to select a word
+- Cmd+C to copy selected text
+- Trackpad two-finger scroll
+
+The find bar triggered by Cmd+F must use PDFKit's built-in search behavior. The acceptance criterion is: find works identically to Preview — matches are highlighted, navigation works, and the bar closes with Escape.
+
+---
+
+## 9. Thread Safety
+
+All heavy processing — OCR page analysis, thumbnail generation, file reading — runs in background tasks. Any structural modification to a PDFDocument — inserting pages, removing pages, adding annotations, applying rotations — must run on the main actor. PDFDocument and PDFPage mutations on background threads cause crashes in CGPDFDocument's core rendering; this is not negotiable.
+
+---
+
+## 10. Background Operations & Progress
+
+All file operations run asynchronously. The UI never blocks. For operations taking more than 1 second, a progress indicator appears. For operations taking more than 2 seconds, a Cancel button appears. Cancellation stops the operation cleanly — no partial output file is written.
+
+For multi-page operations (OCR, split, convert), progress shows the current page and total: "Processing page 4 of 18."
+
+For batch operations (compress multiple files), each file has its own progress row plus an overall progress bar.
+
+---
+
+## 11. Keyboard & Accessibility
+
+Every control is reachable by Tab. Focus rings are always visible — do not suppress them. Standard text editing shortcuts (Cmd+A, Cmd+C, Cmd+V, Cmd+Z) work in every text field.
+
+Full keyboard shortcut set:
+
+| Action | Shortcut |
+|---|---|
+| Open file | Cmd+O |
+| Save / Execute | Cmd+S or Cmd+Return |
+| Print | Cmd+P |
+| Find in document | Cmd+F |
+| Zoom in (viewer) | Cmd+= |
+| Zoom out (viewer) | Cmd+– |
+| Actual size (viewer) | Cmd+0 |
+| Undo | Cmd+Z |
+| Redo | Cmd+Shift+Z |
+| Select all | Cmd+A |
+| Close window | Cmd+W |
+| Preferences | Cmd+, |
+| Quit | Cmd+Q |
+| Switch to tool 1–11 | Cmd+1 through Cmd+0 |
+
+All custom SF Symbol images must have explicit accessibility labels. VoiceOver must be able to navigate all controls and identify all interactive elements.
+
+---
+
+## 12. Status Banner
+
+A persistent banner at the bottom of each panel shows the result of the last operation. It is not a floating overlay — it is part of the panel layout and appears with a slide-up animation.
+
+The banner shows a colored icon (green for success, red for error), a plain English message, and — for file output operations — a "Show in Finder" link. A dismiss button closes it. The banner auto-dismisses after 10 seconds.
+
+A new operation replaces the current banner immediately.
+
+---
+
+## 13. Preferences (Cmd+,)
+
+A standard macOS Preferences window with tabs:
+
+**General:**
+- Default save location: Same as source (default) | Desktop | Downloads | Ask every time
+- After operation: Open in Preview (default, on/off toggle)
+- Clear recent files button
+
+**OCR:**
+- Default language (populated from Vision's supported languages at runtime)
+- Default accuracy level (Fast / Accurate)
+
+There is no appearance override setting. The app follows the system appearance automatically.
+
+---
+
+## 14. Menu Bar
+
+Standard macOS menu bar:
+
+- **PDF Tool:** About PDF Tool, Preferences (Cmd+,), Quit (Cmd+Q)
+- **File:** Open PDF… (Cmd+O), Close (Cmd+W)
+- **Edit:** Undo, Redo, Cut, Copy, Paste, Select All — standard responder chain, no custom handling required
+- **View:** Zoom In, Zoom Out, Actual Size, Show/Hide Sidebar
+- **Tools:** one menu item per tool (Cmd+1 through Cmd+0)
+- **Window:** Minimize, Zoom, standard macOS entries
+- **Help:** PDF Tool Help (opens a simple bundled HTML help file)
+
+---
+
+## 15. App Registration & macOS Integration
+
+The app registers `com.adobe.pdf` as a handled document type so the user can right-click any PDF in Finder and choose "Open With → PDF Tool."
+
+The minimum system version is macOS 14.0. The app must support automatic graphics switching. No network entitlements are included in the entitlements file.
+
+The app icon is provided in `.icns` format with all required sizes: 16, 32, 64, 128, 256, and 512 points at both 1x and 2x.
+
+---
+
+## 16. Compress — Scope & Honesty Rules
+
+The Compress tool makes a best-effort reduction. It works well on PDFs with high-resolution embedded images. It has limited effect on vector-heavy PDFs or PDFs where images are already compressed.
+
+After every compress operation, the actual before and after file sizes are shown. If the size reduction is less than 10%, the result message reads: "This PDF is already well-optimized — not much reduction was possible without quality loss."
+
+The tool must not reduce quality beyond what the selected preset specifies. It must not corrupt embedded fonts, remove bookmarks, or break internal links.
+
+---
+
+## 17. Build Priority Order
+
+The following sequence ensures each phase is independently testable:
+
+1. App shell: window, sidebar navigation, panel switching — all tools show placeholder content
+2. Shared file drop zone widget, file list row widget, progress button widget, status banner
+3. Merge — validates the full UI pattern end-to-end
+4. Split, Rotate, Compress, Extract Pages — core operations, all follow the same pattern
+5. Shared PDFView component (used by Annotate and Fill Form)
+6. Annotate
+7. Fill Form
+8. OCR
+9. Convert — PDF to Images and Images to PDF (native, no dependencies); then Word/Excel with bundled Python
+10. Print
+11. Protect / Unlock
+12. Preferences, menu bar, app registration, packaging and signing
+
+---
+
+## 18. Pre-Flight Test Pack
+
+Before the app is shown to the end user, it must be tested against the following ten real-world PDFs. Each has a specific acceptance criterion.
+
+| File Type | Tool(s) to Test | Pass Criterion |
+|---|---|---|
+| Multi-page scanned bank statement | OCR → Searchable PDF | Text is selectable and Cmd+F finds words in Preview |
+| Clean text PDF (any downloaded article) | Merge, Split, Cmd+F find | All operations complete; find highlights matches |
+| Password-protected PDF | Unlock, Merge (with locked file in list) | Password prompt appears inline; unlock produces valid file |
+| Government form with text fields and checkboxes | Fill Form | All field types respond; filled PDF saves and opens correctly |
+| Two PDFs with different page sizes | Merge | Output preserves each page's original size |
+| Image-heavy brochure over 20 MB | Compress | File size reduces; output opens correctly in Preview |
+| PDF with mixed portrait and landscape pages | Rotate | Individual pages rotate correctly; save produces correct output |
+| Scanned PDF with tilted pages | OCR with deskew on | Output is straight; text is searchable |
+| Large-format PDF (architectural drawing or poster) | All tools that load a viewer | App does not crash; slowness warning shown if applicable |
+| Intentionally corrupted PDF | Any tool | Repair option is offered; app does not crash |
+
+---
+
+## 19. Out of Scope for v1
+
+The following are explicitly excluded and should not be partially implemented or stubbed:
+
+- Cloud sync or iCloud integration
+- Collaborative or shared annotation
+- PDF form creation (only filling existing forms is in scope)
+- Digital signatures
+- Windows or Linux support
+- Automatic software updates
+
+# PDF Tool — v4 Spec Patch (Addendum)
+
+Append this to the v4 spec. Where a section conflicts, this patch takes precedence.
+
+---
+
+## PATCH 1 — Distribution: No Developer Account
+
+The app uses **ad-hoc code signing** only. No Apple Developer account, no notarization, no App Store.
+
+Ad-hoc signing prevents the "app is damaged" error on the user's machine but still triggers a one-time Gatekeeper dialog the very first time the app is opened. This is unavoidable without a paid Developer ID.
+
+The solution is a one-time install ritual that the owner (John) performs personally on his wife's Mac. This only ever happens once. After that, the app opens like any other app with no warnings.
+
+### Install Steps (John performs these, not his wife)
+
+1. Build the `.app` in Xcode using Product → Archive → Export as "Direct Distribution"
+2. Ad-hoc sign it: open Terminal and run `codesign --force --deep --sign - "/path/to/PDF Tool.app"`
+3. Copy the `.app` to her `/Applications` folder
+4. Right-click the `.app` → Open → click "Open" in the dialog that appears
+5. The app opens. Gatekeeper now trusts it permanently on her machine.
+
+From this point forward she double-clicks it like any other app — no warnings, no friction.
+
+**Do not ship a DMG.** Just copy the `.app` directly to `/Applications`. Simpler.
+
+**Do not ask her to install anything.** John does all of the above himself.
+
+---
+
+## PATCH 2 — Sidebar Keyboard Shortcuts (Corrected)
+
+The app has 11 tools. Cmd+1 through Cmd+0 covers 10. The mapping is:
+
+- Cmd+1 → Merge
+- Cmd+2 → Split
+- Cmd+3 → Rotate
+- Cmd+4 → Compress
+- Cmd+5 → Extract Pages
+- Cmd+6 → OCR
+- Cmd+7 → Annotate
+- Cmd+8 → Fill Form
+- Cmd+9 → Convert
+- Cmd+0 → Print
+- Protect / Unlock has no keyboard shortcut — accessible via sidebar click and Tools menu only
+
+---
+
+## PATCH 3 — Privacy / No Network: Clarified Enforcement
+
+"Enforced at entitlements level" means: the entitlements file must not include `com.apple.security.network.client` or `com.apple.security.network.server`. Without those entitlements, macOS blocks all outbound and inbound network connections at the OS level regardless of what the code attempts. This is the actual enforcement mechanism, not a coding convention.
+
+Additionally: no URLSession, no WKWebView, no analytics SDK, no crash reporting framework is included anywhere in the project.
+
+---
+
+## PATCH 4 — OCR Acceptance Criteria (Expanded)
+
+The acceptance criteria for a successful OCR pass are:
+
+1. Text is selectable by click-drag in Preview
+2. Cmd+F in Preview finds the word and highlights it at the correct position
+3. macOS Spotlight can find the file by searching for a word it contains
+4. Copy-pasting a paragraph from Preview yields text in correct reading order (not random blocks)
+5. The search highlight is visually aligned over the word — not significantly offset
+
+If scan quality is poor, the operation still completes and produces searchable output. A banner reads: "This scan is low quality — some text may be inaccurate." This is informational only; it does not block saving.
+
+---
+
+## PATCH 5 — Thread Safety: Clarified (Replaces v4 Section 9)
+
+The rule is not "everything on the main thread." The rule is:
+
+- **Background tasks:** thumbnail rendering, Vision OCR per page, image processing, file reading, size analysis, all CPU-heavy work
+- **Main actor required for:** any mutation of a PDFDocument that is currently displayed in a live PDFView (adding/removing pages, adding annotations, applying rotations). Also all UI state updates.
+- **Background is safe for:** creating a separate PDFDocument instance that is not bound to any visible PDFView, processing it completely, writing it to disk, then passing the output URL back to the main thread. This is the correct pattern for Merge, Split, Compress, and Extract.
+
+The goal is a UI that never stutters. The constraint is that PDFKit document mutations on a live, displayed document must be on the main actor.
+
+---
+
+## PATCH 6 — After Operation: Focus Behavior
+
+After a successful operation, the output file opens in Preview. PDF Tool stays in the background — it does not steal focus or come to the front. Preview opens (or comes forward) and the user continues there.
+
+The workflow is: run merge → Preview opens with the merged file → the user is immediately in Preview looking at their result. They do not need to go back to PDF Tool unless they want to do something else.
+
+---
+
+## PATCH 7 — Annotate Undo: Acceptance Criteria (Replaces vague v4 language)
+
+Acceptance criteria for undo in the Annotate tool:
+
+- Cmd+Z undoes the last annotation change regardless of where keyboard focus is — including when the sidebar list is focused
+- Cmd+Shift+Z redoes
+- The macOS menu bar Edit → Undo shows a descriptive action name: "Undo Add Highlight", "Undo Delete Note", etc. — not just "Undo"
+- Undo history persists for the entire session; it is cleared only when a new file is loaded or the tool is switched
+
+---
+
+## PATCH 8 — Compress: Pinned Implementation (Replaces vague v4 language)
+
+Compress must use the macOS system Quartz filter mechanism — the same path Preview uses for "Reduce File Size." It must not attempt custom image stream parsing.
+
+The operation must preserve: all bookmarks, all internal links, all hyperlinks, all embedded metadata, all fonts (no subsetting). If the operation cannot guarantee preservation of these elements, it must abort and show: "Compression couldn't be completed safely for this PDF."
+
+After every compress operation, show the actual before and after file size. If reduction is less than 10%, show: "This PDF is already well-optimized — not much size reduction was possible."
+
+---
+
+## PATCH 9 — Recent Files (New Section)
+
+Each tool panel shows a "Recent" section below the drop zone when no file has been added yet. It lists the last 5 PDFs used in that specific tool. Each entry shows the filename and the date last used. A single click reopens that file in the tool, ready to use.
+
+Recent files are stored in UserDefaults per tool. They are updated after every successful operation. If a file in the recents list no longer exists on disk, its entry is silently removed the next time the panel is shown.
+
+This section disappears once a file is loaded into the panel. It reappears (with an updated list) after the panel is cleared or reset.
+
+---
+
+## PATCH 10 — PDFView Memory: Cleanup on Tool Switch
+
+When the user switches away from the Annotate or Fill Form tool, the PDFView must release its document reference. Failure to do this causes RAM to grow unboundedly when the user opens multiple large PDFs across a session. 
+
+Implement cleanup in the NSViewRepresentable's dismantleNSView method: set the PDFView's document to nil and remove it from its superview before deallocation.
+
+---
+
+## PATCH 11 — Python Bundling: What Claude Code Does vs. What John Does
+
+Claude Code will write all Swift code that calls the bundled Python subprocess for Word and Excel conversion, and will write a shell script that downloads and assembles the Python environment.
+
+John must run that shell script manually in Terminal before building the app in Xcode. The script downloads a standalone Python build (python-build-standalone, ~40MB), installs pdf2docx and openpyxl into it, and places the result in the correct location inside the Xcode project. Until this is done, the Convert → Word and Convert → Excel sub-modes will show an error.
+
+This is a one-time setup step. Claude Code must include clear, numbered instructions in a README for exactly what John needs to run and in what order. The instructions must assume no Python knowledge.
+
+---
+
+## Summary of What Changes from v4
+
+| Section | Change |
+|---|---|
+| Distribution | No Developer account; ad-hoc sign; John installs manually one time |
+| Sidebar shortcuts | 11th tool (Protect) is menu-only, no Cmd shortcut |
+| Privacy enforcement | Clarified as entitlements-level; no network entitlements included |
+| OCR acceptance | Added reading order and highlight alignment criteria |
+| Thread safety | Clarified background vs. main actor rule; background writes are fine on separate document instances |
+| Focus after operation | Preview opens; PDF Tool stays in background |
+| Annotate undo | Acceptance criteria added; menu shows action names |
+| Compress | Pinned to Quartz filter; abort if bookmarks/links at risk |
+| Recent files | New section; per-tool last 5 files; click to reopen |
+| PDFView memory | Cleanup on tool switch via dismantleNSView |
+| Python bundling | Clarified what Claude Code delivers vs. what John must run manually |
+
+
+# PDF Tool — Text Editing Addendum
+
+Append to the v4 spec + v4.1 patch as a new tool. This addendum is self-contained.
+
+---
+
+## New Tool: Edit Text
+
+Add "Edit Text" to the sidebar between Annotate and Fill Form.
+
+Sidebar: SF Symbol `pencil.line`, label "Edit Text", keyboard shortcut Cmd+E (or shift the existing shortcuts down to accommodate).
+
+---
+
+## What This Feature Is and Is Not
+
+**Is:** Click on existing text in a PDF, change it, save. Font, size, and color are matched to the original as closely as possible.
+
+**Is not:** A word processor. It does not reflow paragraphs, does not change page layout, and does not support adding large blocks of new text. It is for corrections — fixing a typo, updating a date, changing a name, swapping a number.
+
+This distinction must be communicated in the UI. A persistent info banner at the top of the panel reads: "Edit Text is designed for small corrections. For large changes, convert to Word first."
+
+---
+
+## How PDF Text Editing Works (Implementation Approach)
+
+PDFKit does not provide direct content-stream text editing. The correct implementation approach for a Mac app without a third-party PDF engine is the overlay method:
+
+1. The user clicks on a word or line of text in the viewer
+2. The app detects the bounds of that text block using PDFKit's selection APIs
+3. A white fill annotation is placed over the original text (erasing it visually)
+4. A FreeText annotation is placed on top, pre-populated with the original text, with font properties matched to the original
+5. The user edits the FreeText annotation inline
+6. On save, both annotations (the white cover and the edited text) are flattened into the page content stream, making the edit permanent and invisible as annotations
+
+This is the same approach used by most non-Adobe PDF editors on macOS. It works correctly and produces output that is indistinguishable from the original in Preview and print. The tradeoff is that font matching is approximate — the spec section below defines exactly how to handle mismatches.
+
+---
+
+## Layout
+
+Same structure as Annotate: a toolbar at the top, the shared PDFView in the center, and a collapsible edits list panel on the left (220 points).
+
+### Toolbar
+
+Left to right:
+- Select/Pan mode (default on load)
+- Edit Text mode (clicking activates text selection behavior)
+- Separator
+- Font name display (read-only, shows detected font of selected text, e.g. "Helvetica")
+- Font size display (read-only, shows detected size, e.g. "12pt")
+- Text color swatch (read-only, shows detected color)
+- Separator
+- Undo | Redo
+- Separator
+- Save button (primary)
+
+Font name, size, and color fields are read-only and update when the user clicks on text. They are informational — they show what was detected, not controls the user adjusts. The app handles matching automatically.
+
+### Edits List Panel
+
+Lists all pending edits grouped by page. Each row shows: page number, a short preview of the original text (truncated), and an arrow → followed by the replacement text. Clicking a row scrolls the viewer to that edit and selects it. Right-click offers Delete (removes the edit, restores original).
+
+### PDFView
+
+Same shared component as Annotate and Fill Form. When Edit Text mode is active, the cursor changes to a text cursor on hover over selectable text regions.
+
+---
+
+## Interaction Flow
+
+### Clicking to Select Text
+
+When Edit Text mode is active and the user clicks anywhere on the page:
+
+1. PDFKit's hit-testing identifies the word under the cursor
+2. The selection expands to the full line containing that word (not just the word — editing a word in isolation mid-sentence creates obvious visual gaps)
+3. The selected text is highlighted with the system selection color
+4. A floating edit bar appears just above the selection (not a separate window — an overlay anchored to the selection bounds in the viewer)
+
+### The Floating Edit Bar
+
+A compact inline editor that appears over the selection:
+
+- A single-line text field pre-populated with the selected text
+- The field is immediately focused and ready to type
+- Pressing Return or clicking outside confirms the edit
+- Pressing Escape cancels and dismisses without making changes
+- If the replacement text is longer than the original, the field expands horizontally — but a warning badge appears: "Text may overflow its original bounds"
+- Delete key on an empty field: offers to delete the text entirely (places a white cover with no text on top)
+
+The floating bar dismisses when the user clicks elsewhere on the page or switches tools.
+
+### Confirming an Edit
+
+When an edit is confirmed:
+- The selection in the viewer updates immediately to show the new text in place (preview state — nothing written to disk yet)
+- The edit appears in the Edits List panel
+- The original text is still recoverable via Undo or via the Edits List panel until Save is clicked
+
+### Multi-line Text
+
+If the user's click lands on text that spans multiple lines (e.g., a sentence that wraps), the selection covers the full wrapped block. The floating edit bar expands to a multi-line text area. Line break positions are preserved.
+
+---
+
+## Font Detection and Matching
+
+PDFKit exposes font information for selected text via PDFSelection and the underlying CGPDFPage resource dictionary. The app extracts:
+
+- Font name (e.g., "TimesNewRomanPS-BoldMT")
+- Font size in points
+- Text color
+- Text rendering mode (fill, stroke, fill+stroke)
+
+This information is used to style the replacement FreeText annotation to match as closely as possible.
+
+### Font Matching Rules
+
+Extracted PDF font names are often internal PostScript names that do not map directly to installed macOS fonts. The matching rules in priority order:
+
+1. If the exact font name is available as an installed macOS font, use it
+2. If not, map common PostScript names to their macOS equivalents (Times New Roman → Times New Roman, HelveticaNeue → Helvetica Neue, etc. — maintain a lookup table of the 50 most common PDF font names)
+3. If no match is found, fall back to the system serif font for serif text (detected by font name containing "Times", "Garamond", "Georgia", "Palatino", "Century", "Book") and system sans-serif for everything else
+4. Size and color are always applied exactly as detected — these do not approximate
+
+### Mismatch Warning
+
+If the app falls back to a substitute font (rule 3 above), the floating edit bar shows a small warning: "Font approximated — visual match may vary." This sets honest expectations without blocking the edit.
+
+### When Color Cannot Be Detected
+
+If text color cannot be extracted (some PDFs store color in ways that are not easily parsed), default to black. Show the same "Font approximated" warning.
+
+---
+
+## Saving
+
+The Save button triggers the same overwrite confirmation sheet as other tools.
+
+On save, the flattening process runs in a background task:
+
+1. For each confirmed edit, write two annotations to the PDF page: a white-filled rectangle annotation covering the original text bounds, and a FreeText annotation with the replacement text at the same position
+2. After all edits are written as annotations, perform a PDFKit flatten pass: render each page (including annotation layers) to a new PDF page content stream, producing a clean PDF with no annotations — just modified page content
+3. Write the result using the atomic write pattern (temp file → rename)
+
+The output PDF has no annotation metadata, no visible edit history, and is indistinguishable from a natively-authored PDF.
+
+If flattening fails for any page (rare, but possible with unusual PDF structures), the fallback is to save with annotations visible but unflattened, and show a banner: "Saved with editable annotations. To flatten permanently, re-open and save again." This ensures the user always gets a saved file even in edge cases.
+
+---
+
+## Edge Cases
+
+| Situation | Behavior |
+|---|---|
+| User clicks on an image or vector graphic | No selection; cursor shows "no text here" indicator (circle-slash) |
+| User clicks on text in a scanned PDF (no text layer) | Banner: "This page is scanned — run OCR first to make text editable." |
+| Replacement text is empty (user deleted all text) | Confirmation: "Remove this text entirely?" — if confirmed, only the white cover annotation is placed |
+| Text overlaps with an existing annotation | Warning: "This text overlaps an existing annotation. The annotation may be affected." |
+| Very small font size (< 6pt) | Edit is allowed but warning: "This text is very small — edits may not render clearly at this size." |
+| Rotated page | Text detection and bounds mapping must account for page rotation using the page's PDFPage.rotation property — all coordinates transform accordingly |
+| Text in a sidebar/header/footer region | No special treatment — treated identically to body text |
+| User makes 20+ edits on one page | No limit enforced, but a performance note in comments: flattening many edits on one page may be slow |
+
+---
+
+## What Is Explicitly Not Supported
+
+State this clearly in the UI help tooltip on the tool icon:
+
+- Adding new text to a blank area of the page (use Annotate → Text Note for that)
+- Changing font, size, or color of existing text (the app matches the original; it does not let the user override this)
+- Reflowing or reformatting paragraphs
+- Editing text inside images or vector artwork
+- Editing text in password-protected PDFs that disallow editing (the Protect tool's "Allow Editing" permission flag governs this — if editing is not permitted, this tool shows a banner explaining why)
+
+---
+
+## Acceptance Criteria
+
+Before shipping this feature:
+
+1. Open a standard text PDF. Click a word. The floating edit bar appears with that line's text pre-populated.
+2. Change one word. Press Return. The viewer shows the change immediately.
+3. Save. Open the output in Preview. The changed word appears correctly. No annotation artifacts are visible. Text is selectable.
+4. The font and size of the replacement text visually matches the surrounding text on screen and in print.
+5. Undo (Cmd+Z) after confirming an edit restores the original text in the viewer.
+6. Clicking a scanned page shows the OCR banner — no crash, no silent failure.
+7. Saving a file where font detection fell back to a substitute: the warning was shown during editing, and the output looks acceptable in Preview.
+
+---
+
+## Summary of Spec Changes
+
+| Item | Value |
+|---|---|
+| New sidebar item | "Edit Text", between Annotate and Fill Form |
+| SF Symbol | `pencil.line` |
+| Keyboard shortcut | Cmd+E |
+| Implementation method | Overlay (white cover + FreeText annotation), flattened on save |
+| Font matching | Exact → lookup table → serif/sans fallback, with warning |
+| Text editing scope | Line-level corrections only, not paragraph reflow |
+| Saves as | New file `[original]_edited.pdf` by default |
+| Atomic write | Yes, same pattern as all other tools |
+| Shared component | Uses existing PDFViewerWrapper — no new viewer needed |
